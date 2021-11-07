@@ -1,0 +1,167 @@
+<!doctype html>
+<html>
+	<head>
+		<meta charset="utf-8">
+		<title>Telemetry</title>
+		<meta name="viewport" content="width=device-width, initial-scale=1">
+		<link rel="stylesheet" href="{[uPlotStyleURI]}">
+		<link rel="stylesheet" href="{[styleURI]}">
+        <script src="{[vueScriptURI]}"></script>
+	</head>
+	<body>
+        
+        <div id="app">
+            <header class="top-banner">
+                <div class="top-banner-left">
+                    <img src="{[logoMediaURI]}"/>
+                    <div>
+                        <!--Serial-->
+                        <select v-model="serialPort" style="min-width: 6em;">
+                            <option v-for="port in serialPortList" v-bind:key="port.path" v-bind:value="port.path">
+                                {{port.path}}
+                            </option>
+                        </select>
+                        <select v-model="serialBaudrate">
+                            <option value="300">300</option>
+                            <option value="1200">1200</option>
+                            <option value="2400">2400</option>
+                            <option value="4800">4800</option>
+                            <option value="9600">9600</option>
+                            <option value="19200">19200</option>
+                            <option value="38400">38400</option>
+                            <option value="57600">57600</option>
+                            <option value="74880">74880</option>
+                            <option value="115200">115200</option>
+                            <option value="230400">230400</option>
+                            <option value="460800">460800</option>
+                            <option value="576000">576000</option>
+                            <option value="921600">921600</option>
+                         </select>
+                        <button @click="listSerialPorts()">↻</button>
+                        <button v-if="!serialPortConnected" @click="connectSerialPort(serialPort, serialBaudrate)">Connect</button>
+                        <button v-if="serialPortConnected" @click="disconnectSerialPort()">Disconnect</button>
+                    </div>
+                </div>
+                <div v-if="dataAvailable">
+                    <span title="Telemetry and logs ingest rate">{{(telemRate+logRate).toFixed(0)}}/s </span>
+                    <select v-model="viewDuration">
+                        <option value="0">no window</option>
+                        <option value="1">1 second</option>
+                        <option value="5">5 seconds</option>
+                        <option value="15">15 seconds</option>
+                        <option value="30">30 seconds</option>
+                        <option value="60">1 minute</option>
+                        <option value="300">5 minutes</option>
+                        <option value="900">15 minutes</option>
+                        <option value="1800">30 minutes</option>
+                        <option value="3600">1 hour</option>
+                        <option value="21600">6 hours</option>
+                        <option value="43200">12 hours</option>
+                        <option value="86400">1 day</option>
+                     </select>
+                    <button onclick="exportSessionJSON()">Download</button>
+                    <button @click="clearAll()">Clear</button>
+                </div>
+                <div v-else>
+                    <input type="file" onchange="importSessionJSON(event)" id="session-json-input" />
+                </div>
+            </header>
+
+            <div class="main-body">
+                <!--Variables-->
+                <div class="var-container" v-if="!leftPanelVisible">
+                    <button @click="showLeftPanel(true)" class="left-rounded-btn">></button>
+                </div>
+                <div class="left-col var-container" v-if="dataAvailable && leftPanelVisible">
+                    <button @click="showLeftPanel(false)" class="left-reduce-btn">Reduce</button>
+                    <div v-for="telem in telemetries" v-bind:key="'var-'+telem.name"
+                    class="var-vue" @click="toggleVisibility(telem)"
+                    v-bind:class="{ 'var-vue-visible': telem.visible }">
+                        <div class="var-vue-name">{{telem.name}}</div>
+                        <div class="var-vue-value" v-if="telem.value != null">
+                            {{telem.value.toFixed(4)}}
+                        </div>
+                    </div>
+                </div>
+
+                <!-- PLOTS -->
+                <div class="center-col">
+                    <div v-if="!dataAvailable" class="help-container">
+                        <img src="{[logoMediaURI]}"/>
+                        <span>Ready to plot incoming telemetry.</span>
+                    </div>
+                    <div class="telem-container">
+                        <div v-for="telem in telemetries" v-bind:key="'telem-'+telem.name" class="telem-vue" v-if="telem.visible">
+                            <div class="telem-vue-header">
+                                <div class="telem-stat">
+                                    <span class="telem-stat-name">Name</span>
+                                    <span class="telem-stat-value">{{telem.name}}</span>
+                                </div>
+                                <div class="telem-stat">
+                                    <span class="telem-stat-name">Value</span>
+                                    <span class="telem-stat-value" v-if="telem.value != null">{{telem.value.toFixed(4)}}</span>
+                                </div>
+                                <div v-if="telem.stats" class="telem-stat">
+                                    <span class="telem-stat-name">Mean</span>
+                                    <span class="telem-stat-value" v-if="telem.stats.mean != null">{{telem.stats.mean.toFixed(4)}}</span>
+                                </div>
+                                <div v-if="telem.stats"  class="telem-stat">
+                                    <span class="telem-stat-name">Median</span>
+                                    <span class="telem-stat-value" v-if="telem.stats.med != null">{{telem.stats.med.toFixed(4)}}</span>
+                                </div>
+                                <div v-if="telem.stats"  class="telem-stat">
+                                    <span class="telem-stat-name">Stdev</span>
+                                    <span class="telem-stat-value" v-if="telem.stats.stdev != null">{{telem.stats.stdev.toFixed(4)}}</span>
+                                </div>
+                                <div class="">
+                                    <button @click="updateStats(telem)">stats</button>
+                                </div>
+                            </div>
+                            <uplot-vue v-bind:data="telem.data" v-bind:options="telem.config"/>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- CMD -->
+
+                <div class="var-container" v-if="!rightPanelVisible">
+                    <button @click="showRightPanel(true)" class="right-rounded-btn"><</button>
+                </div>
+                <div class="right-col cmd-container" v-if="(cmdAvailable || logAvailable) && rightPanelVisible">
+                    <button @click="showRightPanel(false)" class="right-reduce-btn" >Reduce</button>
+                    <div v-for="cmd in commands" v-bind:key="cmd.name" class="cmd-vue">
+                        <button @click="sendCmd(cmd)">{{cmd.name}}</button>
+                    </div>
+
+                    <!-- LOG -->
+                    <div class="log-container" v-if="logAvailable">
+                        <span v-for="(log, index) in logs" v-bind:key="index" class="log-vue" @click="onLogClick(log, index)"
+                            v-bind:class="{ 'log-vue-selected': log.selected }">
+                            {{log.text}}
+                        </span>
+                    </div>
+                    <div class="send-text-container">
+                        <input v-on:keyup.enter="sendText(textToSend)" type="text" placeholder="Send to serial" v-model="textToSend" style="width:100%"/>
+                        <select v-model="sendTextLineEnding" style="max-width: 60px;">
+                            <option value="\r\n">\r\n</option>
+                            <option value="\n">\n</option>
+                            <option value="\r">\r</option>
+                            <option value="">empty</option>
+                        </select>
+                        <button :disabled="!serialPortConnected" @click="sendText(textToSend)" style="max-width: 60px;">Send</button>
+                    </div>
+                </div>
+
+            </div>
+
+            
+
+
+            
+        </div>
+
+    </body>
+    <script src="{[uPlotScriptURI]}"></script>
+    <script src="{[uPlotComponentScriptURI]}"></script>
+    <script src="{[scriptURI]}"></script>
+</html>

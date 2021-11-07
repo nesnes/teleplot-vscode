@@ -1,0 +1,263 @@
+html {
+	font-family: Verdana, Geneva, Tahoma, sans-serif;
+}
+
+button {
+	background-color: #ecf0f1;
+    border: 1px solid #bdc3c7;
+    border-radius: 3px;
+    color: #2c3e50;
+    padding: 0.5em 0.5em;
+    text-align: center;
+    text-decoration: none;
+    display: inline-block;
+    cursor: pointer;
+    font-size: 12px;
+}
+
+.top-banner {
+	display: flex;
+	background-color: #2980b9;
+	padding-top: 3px;
+	padding-bottom: 3px;
+	padding-left: 10px;
+	padding-right: 10px;
+	color: white;
+	justify-content: space-between;
+	align-items: center;
+	height: 50px;
+}
+.top-banner > div {
+	min-width: 150px;
+}
+
+.top-banner-left {
+	display: flex;
+	flex-direction: row;
+    align-items: center;
+}
+
+.top-banner-title {
+	display: block;
+	font-size: 30px;
+}
+
+body {
+	margin: 0px;
+	padding: 0px;
+	background-color: #ecf0f1;
+}
+
+.main-body {
+	display: flex;
+	flex-direction: row;
+	flex-wrap: wrap;
+}
+.left-col {
+	min-width: min(250px, max(100px, 20%));
+}
+.center-col {
+	min-width: min(400px, 50%);
+	flex: 3;
+}
+.right-col {
+	min-width: min(350px, max(250px, 30%));
+	flex: 1;
+}
+
+.help-container {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	font-size: 16px;
+	color: #7f8c8d;
+}
+
+.help-container img {
+	display: block;
+	width: 300px;
+	margin-top: 100px;
+}
+.help-container span {
+	display: block;
+	margin-top: 100px;
+}
+
+.telem-container {
+	display: flex;
+	flex-direction: row;
+	flex-wrap: wrap;
+	justify-content: center;
+	align-content: stretch;
+	align-items: center;
+	padding: 5px;
+}
+
+.telem-vue {
+	flex: 1 1;
+	align-self: auto;
+	min-width: max(300px, 45%);
+	box-shadow: 0px 0px 8px rgba(0,0,0,0.2);
+	border-radius: 3px;
+	margin: 5px;
+}
+
+.telem-vue-header {
+	display: flex;
+	flex-direction: row;
+	justify-content: space-around;
+	flex-wrap: wrap;
+}
+
+.telem-vue-title {
+	display: block;
+	font-size: 22px;
+	text-align: center;
+}
+
+.telem-stat {
+	display: flex;
+	flex-direction: column;
+	align-items: left;
+}
+
+.telem-stat-value {
+	font-size: 13px;
+	color: #2c3e50;
+}
+.telem-stat-name {
+	font-size: 11px;
+	color: #7f8c8d;
+}
+
+.var-container {
+	display: flex;
+	flex-direction: column;
+}
+
+.var-vue {
+	border-bottom: 1px solid rgba(0,0,0,0.12);
+	padding: 5px;
+	font-size: 14px;
+	display: flex;
+	flex-direction: row;
+	justify-content: space-between;
+	cursor: pointer;
+}
+
+.var-vue-name {
+	color : #7f8c8d;
+	max-width: 250px;
+	word-break: break-all;
+}
+
+.var-vue-visible > .var-vue-name {
+	color: black;
+}
+
+.var-vue-value {
+	background-color: #7f8c8d;
+	border-radius: 5px;
+	padding: 2px 5px 2px 5px;
+	color: white;
+	margin-left: 5px;
+	width: 60px;
+	text-align: center;
+}
+
+.var-vue-visible  > .var-vue-value {
+	background-color: #2ecc71;
+	color: white;
+}
+
+.cmd-container {
+	display: flex;
+	flex-direction: column;
+}
+
+.cmd-container-title {
+	font-size: 18px;
+	margin-top: 10px;
+}
+
+.cmd-vue {
+	padding-top: 10px;
+}
+
+.log-container {
+	display: flex;
+	flex-direction: column-reverse;
+	background-color: #2c3e50;
+	font-size: 12px;
+	height: 400px;
+	min-width: 90%;
+	overflow: auto;
+	margin-top: 1em;
+	padding-left: 5px;
+	padding-bottom: 5px;
+}
+
+.log-vue {
+	display: block;
+	color: #ecf0f1;
+	cursor: pointer;
+}
+.log-vue-selected {
+	background-color: #27ae60;
+}
+
+.left-rounded-btn {
+	border-radius: 50%;
+    padding-right: 0px;
+    display: block;
+    margin-left: -20px;
+    width: 40px;
+    height: 40px;
+    background-color: #2980b9;
+    font-weight: bold;
+    color: white;
+    border: 0px;
+    margin-top: 5px;
+}
+
+.right-rounded-btn {
+	border-radius: 50%;
+    padding-left: 0px;
+    display: block;
+    margin-right: -20px;
+    width: 40px;
+    height: 40px;
+    background-color: #2980b9;
+    font-weight: bold;
+    color: white;
+    border: 0px;
+    margin-top: 5px;
+}
+
+.left-reduce-btn {
+	width: 60px;
+	margin-top: 0;
+	padding: 2px;
+	background-color: #2980b9;
+	font-weight: bold;
+	color: white;
+	border: 0px;
+	border-radius: 0 0 5px 0;
+}
+
+.right-reduce-btn {
+	width: 60px;
+	margin-top: 0;
+	padding: 2px;
+	background-color: #2980b9;
+	font-weight: bold;
+	color: white;
+	border: 0px;
+	border-radius: 0 0 0 5px;
+	align-self: flex-end;
+}
+
+.send-text-container {
+	display: flex;
+	flex-direction: row;
+}
