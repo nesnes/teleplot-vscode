@@ -1,5 +1,5 @@
 // support to VSCode 1.59.0
-// https://github.com/VSChina/serialport.node/releases/tag/downloads
+// https://github.com/bencefr/serialport.node/releases
 
 const fs = require('fs');
 const path = require('path');

@@ -3,11 +3,6 @@ import * as path from 'path';
 import * as fs from 'fs';
 const { SerialPort } = require('node-usb-native');
 const Readline = require('@serialport/parser-readline')
-//var libserialport = require('libserialport');
-//import * as libserialport from 'libserialport'
-//import {SerialPortLite} from 'serialport-lite'
-//const SerialPort = require('serialport')
-//const { SerialPort } = require('node-usb-native');
 
 const UDP_PORT = 47269;
 const CMD_UDP_PORT = 47268;
