@@ -1,6 +1,7 @@
 // Init Vue
 
 const vscode = acquireVsCodeApi();
+var widgets = [];
 var telemetries = {};
 var commands = {};
 var logs = [];
@@ -9,6 +10,7 @@ var logBuffer = [];
 var app = new Vue({
     el: '#app',
     data: {
+        widgets: widgets,
         telemetries: telemetries,
         commands: commands,
         logs: logs,
@@ -25,18 +27,16 @@ var app = new Vue({
         serialBaudrate: 115200,
         serialPortConnected : false,
         textToSend: "",
-        sendTextLineEnding: "\\r\\n"
+        sendTextLineEnding: "\\r\\n",
+        newChartDropZoneOver: false
     },
     methods: {
-        updateStats: function(telem){
-            Vue.set(telem, "stats", computeStats(telem.data))
+        updateStats: function(widget){
+            widget.updateStats();
+            //Vue.set(telem, "stats", computeStats(telem.data))
         },
         sendCmd: function(cmd) {
             socket.send(`|${cmd.name}|`);
-        },
-        toggleVisibility: function(telem) {
-            telem.visible = !telem.visible;
-            triggerChartResize();
         },
         onLogClick: function(log, index) {
             for(l of app.logs) l.selected = log.timestamp > 0 && l.timestamp == log.timestamp;
@@ -54,7 +54,7 @@ var app = new Vue({
             vscode.postMessage({ cmd: "listSerialPorts"});
         },
         connectSerialPort: function(port, baud) {
-            vscode.postMessage({ cmd: "connectSerialPort", port: port, baud: baud});
+            vscode.postMessage({ cmd: "connectSerialPort", port: port, baud: parseInt(""+baud)});
         },
         disconnectSerialPort: function() {
             vscode.postMessage({ cmd: "disconnectSerialPort"});
@@ -68,6 +68,8 @@ var app = new Vue({
             commands = {};
             Vue.set(app, 'commands', commands);
             telemBuffer = {};
+            widgets.length = 0;
+            Vue.set(app, 'widgets', widgets);
             app.dataAvailable = false;
             app.cmdAvailable = false;
             app.logAvailable = false;
@@ -76,10 +78,85 @@ var app = new Vue({
             let escape = app.sendTextLineEnding.replace("\\n","\n");
             escape = escape.replace("\\r","\r");
             vscode.postMessage({ cmd: "sendToSerial", text: text+escape});
-        }
+        },
+        onDragTelemetry: function(e, telemetryName){
+            e.dataTransfer.dropEffect = 'copy'
+            e.dataTransfer.effectAllowed = 'copy'
+            e.dataTransfer.setData("telemetryName", telemetryName);
+        },
+        onDropInWidget: function(e, widget){            
+            widget.draggedOver = false;
+            let telemetryName = e.dataTransfer.getData("telemetryName");
+            let serie = new DataSerie(telemetryName);
+            serie.sourceNames = [telemetryName];
+            widget.addSerie(serie);
+        },
+        onWidgetDragOver: function(e, widget){
+            e.preventDefault();
+            widget.draggedOver = true;
+        },
+        onWidgetDragLeave: function(e, widget){
+            e.preventDefault();
+            widget.draggedOver = false;
+        },
+        showWidget: function(widget, show){
+            widget.hidden = show;
+            console.log(widget, show)
+            triggerChartResize();
+        },
+        removeWidget: function(widget){
+            let idx = widgets.findIndex((w)=>w.id==widget.id);
+            if(idx>=0) app.widgets.splice(idx, 1);
+            triggerChartResize();
+        },
+        onDropInNewChart: function(e){            
+            newChartDropZoneOver = false;
+            let telemetryName = e.dataTransfer.getData("telemetryName");
+            let chart = new ChartWidget();
+            let serie = new DataSerie(telemetryName);
+            serie.sourceNames = [telemetryName];
+            chart.addSerie(serie);
+            widgets.unshift(chart); // prepend chart
+        },
+        onNewChartDragOver: function(e){
+            e.preventDefault();
+            newChartDropZoneOver = true;
+        },
+        onNewChartDragLeave: function(e){
+            e.preventDefault();
+            newChartDropZoneOver = false;
+        },
 
     }
 })
+function rgba(r,g,b,a){
+    return {r,g,b,a, toString: function(){ return `rgba(${this.r},${this.g},${this.b},${this.a})`}};
+}
+var ColorPalette = {
+    colors: [
+        rgba(231, 76, 60,1.0), //red
+        rgba(52, 152, 219,1.0), //blue
+        rgba(46, 204, 113,1.0), //green
+        rgba(155, 89, 182,1.0), //violet
+        rgba(241, 196, 15,1.0), //yellow
+        rgba(26, 188, 156,1.0), //turquoise
+        rgba(230, 126, 34,1.0), //orange
+        rgba(52, 73, 94,1.0), //blueish grey
+        rgba(127, 140, 141,1.0), //gray
+        rgba(192, 57, 43,1.0), //dark red
+        rgba(41, 128, 185,1.0), //darkblue
+        rgba(39, 174, 96,1.0), //darkgreen
+        rgba(142, 68, 173,1.0), // darkviolet
+        rgba(211, 84, 0,1.0), //darkorange
+        rgba(44, 62, 80,1.0), //blueish darkgrey
+        rgba(0, 0, 0,1.0), //black
+    ],
+    getColor: function(index, alpha=1.0){
+        let color = Object.assign({}, this.colors[index % this.colors.length]);
+        color.a = alpha;
+        return color;
+    }
+}
 
 //Init refresh rate
 setInterval(updateView, 60); // 15fps
@@ -162,6 +239,140 @@ var defaultPlotOpts = {
         show: false
     }
 };
+
+var DataSerieIdCount = 0;
+class DataSerie{
+    constructor(_name){
+        this.name = _name;
+        this.sourceNames = [];
+        this.formula = "";
+        this.initialized = false;
+        this.data = [[],[]];
+        this.pendingData = [[],[]];
+        this.options = {};
+        this.value = null;
+        this.id = "data-serie-" + DataSerieIdCount++;
+        this.stats = null;
+    }
+
+    update(){
+        // no formula, simple data reference
+        if(this.formula=="" && this.sourceNames.length==1){
+            this.data[0] = app.telemetries[this.sourceNames[0]].data[0];
+            this.data[1] = app.telemetries[this.sourceNames[0]].data[1];
+            this.pendingData[0] = app.telemetries[this.sourceNames[0]].pendingData[0];
+            this.pendingData[1] = app.telemetries[this.sourceNames[0]].pendingData[1];
+            this.value = app.telemetries[this.sourceNames[0]].value;
+        }
+    }
+
+    updateStats(){
+        this.stats = computeStats(this.data);
+    }
+}
+
+var DataWidgetIdCount = 0;
+class DataWidget{
+    constructor() {
+        this.series = []; // DataSerie
+        this.type = "chart";
+        this.id = "widget-chart-" + DataWidgetIdCount++;
+        this.gridPos = {h:3, w:3, x:0, y:0};   
+    }
+
+    isUsingSource(name){
+        for(let s of this.series)
+            if(s.sourceNames.includes(name)) return true;
+        return false;
+    }
+
+    _getSourceList(){
+        let sourceList = {};
+        for(let s of this.series)
+            for(let n of s.sourceNames)
+                sourceList[n] = app.telemetries[n];
+        return sourceList;
+    }
+
+    updateStats(){
+        for(let s of this.series)
+            s.updateStats();
+    }
+}
+
+class ChartWidget extends DataWidget{
+    constructor() {
+        super();
+        this.data = [[]];
+        this.options = {
+            title: "",
+            width: 400,
+            height: 250,
+            scales: { x: {  time: true }, y:{} },
+            series: [ {} ],
+            focus: { alpha: 1.0, },
+            cursor: {
+                lock: false,
+                focus: { prox: 16, },
+                sync: {  key: window.cursorSync.key,  setSeries: true }
+            },
+            legend: { show: false }
+        }
+        this.forceUpdate = true;
+    }
+
+    addSerie(_serie){
+        _serie.options._serie = _serie.name;
+        _serie.options.stroke = ColorPalette.getColor(this.series.length).toString();
+        _serie.options.fill = ColorPalette.getColor(this.series.length, 0.1).toString();
+        this.options.series.push(_serie.options);
+        _serie.dataIdx = this.data.length;
+        //this.data.push([]);
+        this.series.push(_serie);
+        this.forceUpdate = true;
+    }
+
+    update(){
+        // Update each series
+        for(let s of this.series) s.update();
+        //Create data with common x axis
+        if(this.data[0].length==0 || this.forceUpdate) {
+            let dataList = [];
+            for(let s of this.series) dataList.push(s.data);
+            this.data.length = 0;
+            this.data = uPlot.join(dataList)
+            this.id += "-" //dummy way to force update
+            triggerChartResize();
+            this.forceUpdate = false;
+        }
+        else {
+            //Iterate on all series, adding timestamps and values
+            let dataList = [];
+            for(let s of this.series) dataList.push(s.pendingData);
+            let pending = uPlot.join(dataList);
+            if(pending[0].length){
+                for(let i=0;i<pending.length;i++){
+                    this.data[i].push(...pending[i]);
+                }
+                   // Vue.set(widgets, "data", this.data);
+            }
+        }        
+        //Clear older data from viewDuration
+        if(parseFloat(app.viewDuration)>0)
+        {
+            let latestTimestamp = this.data[0][this.data[0].length-1];
+            let minTimestamp = latestTimestamp - parseFloat(app.viewDuration);
+            let minIdx = findClosestLowerByIdx(this.data[0], minTimestamp);
+            if(this.data[0][minIdx]<minTimestamp)
+            {
+                minIdx += 1;
+                for(let i=0;i<this.data.length;i++){
+                    this.data[i].splice(0, minIdx);
+                }
+            }
+        }
+    }
+}
 
 window.addEventListener('message', message => {
     let msg = message.data;
@@ -266,11 +477,21 @@ function appendData(key, valuesX, valuesY, flags) {
             name: key,
             flags: flags,
             data: [[],[]],
+            pendingData: [[],[]],
             value: 0,
-            config: config,
-            visible: shouldPlot
+            config: config
         };
         Vue.set(app.telemetries, key, obj)
+        // Create widget
+        if(shouldPlot){
+            let chart = new ChartWidget();
+            let serie = new DataSerie(key);
+            serie.sourceNames = [key];
+            chart.addSerie(serie);
+            widgets.push(chart);
+        }
+    }
+    if(telemBuffer[key] == undefined){
         telemBuffer[key] = {data:[[],[]], value:0};
     }
     if(isTimeBased) valuesX.forEach((elem, idx, arr)=>arr[idx] = elem/1000); // convert timestamps to seconds
@@ -284,6 +505,11 @@ function appendData(key, valuesX, valuesY, flags) {
 
 var lastUpdateViewTimestamp = 0;
 function updateView() {
+    // Clear Telemetries pendingData
+    for(let key in app.telemetries) {
+        app.telemetries[key].pendingData[0].length = 0;
+        app.telemetries[key].pendingData[1].length = 0;
+    }
     // Flush buffer into app model
     // Telemetry
     let dataSum = 0;
@@ -292,6 +518,8 @@ function updateView() {
         dataSum += telemBuffer[key].data[0].length;
         app.telemetries[key].data[0].push(...telemBuffer[key].data[0]);
         app.telemetries[key].data[1].push(...telemBuffer[key].data[1]);
+        app.telemetries[key].pendingData[0].push(...telemBuffer[key].data[0]);
+        app.telemetries[key].pendingData[1].push(...telemBuffer[key].data[1]);
         app.telemetries[key].value = telemBuffer[key].value
         telemBuffer[key].data[0].length = 0;
         telemBuffer[key].data[1].length = 0;
@@ -310,6 +538,10 @@ function updateView() {
             app.telemetries[key].data[0].splice(0, minIdx);
             app.telemetries[key].data[1].splice(0, minIdx);
         }
+    }
+    // Update widgets
+    for(let w of widgets){
+        w.update();
     }
 
     if(!app.dataAvailable && Object.entries(app.telemetries).length>0) app.dataAvailable = true;
@@ -358,8 +590,13 @@ function importSessionJSON(event) {
     reader.onload = function(e) {
         try{
             let content = JSON.parse(e.target.result);
+            for(let key in content.telemetries){
+                // Add pendingData field if missing
+                if(!("pendingData" in content.telemetries[key])){
+                    content.telemetries[key].pendingData = [[],[]];
+                }
+            }
             for(let key in content) {
-                Object.ass
                 Vue.set(app, key, content[key]);
             }
             // Trigger a resize event after initial chart display
@@ -372,8 +609,10 @@ function importSessionJSON(event) {
     reader.readAsText(file);
 }
 
+var chartResizeTimeout = null;
 function triggerChartResize(){
-    setTimeout(()=>{
+    if(chartResizeTimeout) clearTimeout(chartResizeTimeout);
+    chartResizeTimeout = setTimeout(()=>{
         window.dispatchEvent(new Event('resize'));
     }, 100);
 }
@@ -470,7 +709,17 @@ setInterval(()=>{
 
 function parseVScmd(msg){
     if(msg.cmd == "serialPortList"){
-        app.serialPortList = msg.list;
+        let filteredList = [];
+        for(let serial of msg.list){
+            if( serial.locationId
+             || serial.serialNumber
+             || serial.pnpId
+             || serial.vendorId
+             || serial.productId ){
+                filteredList.push(serial);
+            }
+        }
+        app.serialPortList = filteredList;
     }
     else if(msg.cmd == "serialPortConnect"){
         app.serialPortConnected = true;
