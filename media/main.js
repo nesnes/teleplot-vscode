@@ -1,6 +1,9 @@
 // Init Vue
 
-const vscode = acquireVsCodeApi();
+var vscode = null;
+if("acquireVsCodeApi" in window) vscode = acquireVsCodeApi();
+
+var connections = [];
 var widgets = [];
 var telemetries = {};
 var commands = {};
@@ -10,6 +13,7 @@ var logBuffer = [];
 var app = new Vue({
     el: '#app',
     data: {
+        connections: connections,
         widgets: widgets,
         telemetries: telemetries,
         commands: commands,
@@ -22,13 +26,11 @@ var app = new Vue({
         viewDuration: 0,
         leftPanelVisible: true,
         rightPanelVisible: true,
-        serialPortList: [],
-        serialPort : null,
-        serialBaudrate: 115200,
-        serialPortConnected : false,
         textToSend: "",
         sendTextLineEnding: "\\r\\n",
-        newChartDropZoneOver: false
+        newChartDropZoneOver: false,
+        newConnectionAddress: "",
+        creatingConnection: false
     },
     methods: {
         updateStats: function(widget){
@@ -49,15 +51,6 @@ var app = new Vue({
         showRightPanel: function(show) {
             app.rightPanelVisible=show;
             triggerChartResize();
-        },
-        listSerialPorts: function() {
-            vscode.postMessage({ cmd: "listSerialPorts"});
-        },
-        connectSerialPort: function(port, baud) {
-            vscode.postMessage({ cmd: "connectSerialPort", port: port, baud: parseInt(""+baud)});
-        },
-        disconnectSerialPort: function() {
-            vscode.postMessage({ cmd: "disconnectSerialPort"});
         },
         clearAll: function() {
             logs.length = 0;
@@ -126,7 +119,28 @@ var app = new Vue({
             e.preventDefault();
             newChartDropZoneOver = false;
         },
-
+        createConnection: function(){
+            let conn = new ConnectionTeleplotWebsocket();
+            let addr = app.newConnectionAddress;
+            let port = 8080;
+            if(addr.includes(":")) {
+                port = parseInt(addr.split(":")[1]);
+                addr = addr.split(":")[0];
+            }
+            conn.connect(addr, port);
+            app.connections.push(conn);
+            app.creatingConnection = false;
+            app.newConnectionAddress = "";
+        },
+        removeConnection: function(conn){
+            for(let i=0;i<app.connections.length;i++){
+                if(app.connections[i] == conn) {
+                    app.connections[i].disconnect();
+                    app.connections.splice(i,1);
+                    break;
+                }
+            }
+        }
     }
 })
 function rgba(r,g,b,a){
@@ -239,6 +253,276 @@ var defaultPlotOpts = {
         show: false
     }
 };
+
+var ConnectionCount = 0;
+class Connection{
+    constructor(){
+        this.name = "";
+        this.id = "connection-"+ConnectionCount++;
+        this.type = "";
+        this.connected = false;
+        this.inputs = [];
+    }
+
+    connect(){
+
+    }
+
+    removeInput(input){
+        for(let i=0;i<this.inputs.length;i++){
+            if(this.inputs[i] == input) {
+                this.inputs[i].disconnect();
+                this.inputs.splice(i,1);
+                break;
+            }
+        }
+    }
+}
+
+class ConnectionTeleplotVSCode extends Connection{
+    constructor() {
+        super();
+        this.name="localhost-VSCode"
+        this.type = "teleplot-vscode";
+        this.vscode = vscode;
+        this.udp = new DataInputUDP(this, "UDP");
+        this.udp.address = "localhost";
+        this.udp.port = 47269;
+        this.inputs.push(this.udp);
+        
+        this.supportSerial = true;
+        let serialIn = new DataInputSerial(this, "Serial");
+        this.inputs.push(serialIn);
+    }
+
+    connect() {
+        if(!this.vscode) return false;
+        window.addEventListener('message', message => {
+            let msg = message.data;
+            if("id" in msg){
+                for(let input of this.inputs){
+                    if(input.id == msg.id){
+                        input.onMessage(msg);
+                        break;
+                    }
+                }
+            }
+            else{
+                if("data" in msg) {
+                    parseData(msg); //update server so it keeps track of connection IDs when forwarding data
+                }
+                else if("cmd" in msg) {
+                    //nope
+                }
+            }
+        });
+        this.vscode.postMessage({ cmd: "listSerialPorts"});
+        //Report UDP input as connected
+        this.udp.connected = true;
+        this.connected = true;
+        return true;
+    }
+
+    disconnect() {
+        for(let input of this.inputs){
+            input.disconnect();
+        }
+        this.connected = false;
+    }
+
+    sendServerCommand(command) {
+        this.vscode.postMessage(command);
+    }
+
+    updateCMDList() {
+        for(let input of this.inputs){
+            input.updateCMDList();
+        }
+    }
+
+    createInput(type) {
+        if(type=="serial") {
+            let serialIn = new DataInputSerial(this, "Serial");
+            this.inputs.push(serialIn);
+        }
+    }
+}
+
+class ConnectionTeleplotWebsocket extends Connection{
+    constructor(){
+        super();
+        this.name=""
+        this.type = "teleplot-websocket";
+        this.inputs = [];
+        this.socket = null;
+        this.address = "";
+        this.port = "";
+        this.udp = new DataInputUDP(this, "UDP");
+        this.udp.address = "";
+        this.udp.port = 47269;
+        this.inputs.push(this.udp);
+    }
+
+    connect(_address, _port){
+        this.name = _address+":"+_port;
+        this.address = _address;
+        this.port = _port;
+        this.udp.address = this.address;
+        this.socket = new WebSocket("ws://"+this.address+":"+this.port);
+        this.socket.onopen = (event) => {
+            this.udp.connected = true;
+            this.connected = true;
+            this.sendServerCommand({ cmd: "listSerialPorts"});
+        };
+        this.socket.onclose = (event) => {
+            this.udp.connected = false;
+            this.connected = false;
+            for(let input of this.inputs){
+                input.disconnect();
+            }
+        };
+        this.socket.onmessage = (msgWS) => {
+            let msg = JSON.parse(msgWS.data);
+            if("id" in msg){
+                for(let input of this.inputs){
+                    if(input.id == msg.id){
+                        input.onMessage(msg);
+                        break;
+                    }
+                }
+            }
+            else{
+                this.udp.onMessage(msg);
+            }
+        };
+        return true;
+    }
+
+    disconnect(){
+        if(this.socket){
+            this.socket.close();
+            this.socket = null;
+        }
+    }
+
+    sendServerCommand(command){
+        if(this.socket)
+            this.socket.send(JSON.stringify(command));
+    }
+
+    updateCMDList(){
+        for(let input of this.inputs){
+            input.updateCMDList();
+        }
+    }
+
+    createInput(type) {
+        if(type=="serial") {
+            let serialIn = new DataInputSerial(this, "Serial");
+            this.inputs.push(serialIn);
+        }
+    }
+}
+
+var DataInputCount = 0;
+class DataInput{
+    constructor(_connection, _name){
+        this.connection = _connection;
+        this.name = _name;
+        this.id = "data-input-"+DataInputCount++;
+        this.type = "";
+        this.connected = false;
+    }
+}
+
+class DataInputUDP extends DataInput{
+    constructor(_connection, _name) {
+        super(_connection, _name);
+        this.type = "UDP";
+        this.address = "";
+        this.port = 47269;
+    }
+
+    connect(){}
+    disconnect(){}
+
+    onMessage(msg){
+        if("data" in msg) {
+            msg.input = this;
+            parseData(msg);
+        }
+        else if("cmd" in msg) {
+            //nope
+        }
+    }
+
+    updateCMDList(){
+        this.connection.sendServerCommand({ id: this.id, data: `|_telecmd_list_cmd|`});
+    }
+}
+
+class DataInputSerial extends DataInput{
+    constructor(_connection, _name) {
+        super(_connection, _name);
+        this.port = null;
+        this.baudrate = 115200;
+        this.type = "serial";
+        this.portList = [];
+        this.listPorts();
+        this.textToSend = "";
+        this.endlineToSend = "";
+    }
+
+    connect(){
+        let baud = parseInt(this.baudrate);
+        this.connection.sendServerCommand({ id: this.id, cmd: "connectSerialPort", port: this.port, baud: baud})
+    }
+
+    disconnect(){
+        this.connection.sendServerCommand({ id: this.id, cmd: "disconnectSerialPort"})
+    }
+
+    onMessage(msg){
+        if("data" in msg) {
+            msg.input = this;
+            parseData(msg);
+        }
+        else if("cmd" in msg) {
+            if(msg.cmd == "serialPortList"){
+                this.portList.length = 0;
+                for(let serial of msg.list){
+                    if( serial.locationId
+                     || serial.serialNumber
+                     || serial.pnpId
+                     || serial.vendorId
+                     || serial.productId ){
+                        this.portList.push(serial);
+                    }
+                }
+            }
+            else if(msg.cmd == "serialPortConnect"){
+                this.connected = true;
+            }
+            else if(msg.cmd == "serialPortDisconnect"){
+                this.connected = false;
+            }
+        }
+    }
+
+    listPorts(){
+        this.connection.sendServerCommand({ id: this.id, cmd: "listSerialPorts"});
+    }
+
+    updateCMDList(){
+        //nope
+    }
+
+    sendText(text, lineEndings) {
+        let escape = lineEndings.replace("\\n","\n");
+        escape = escape.replace("\\r","\r");
+        this.connection.sendServerCommand({ id: this.id, cmd: "sendToSerial", text: text+escape});
+    }
+}
 
 var DataSerieIdCount = 0;
 class DataSerie{
@@ -374,26 +658,17 @@ class ChartWidget extends DataWidget{
     }
 }
 
-window.addEventListener('message', message => {
-    let msg = message.data;
-    if("data" in msg) {
-        parseData(msg, true);
-    }
-    else if("cmd" in msg) {
-        parseVScmd(msg);
-    }
-});
-
 function parseData(msgIn){
     let now = new Date().getTime();
-    if(msgIn.fromSerial) now = msgIn.timestamp;
+    let fromSerial = msgIn.fromSerial || (msgIn.input && msgIn.input.type=="serial");
+    if(fromSerial) now = msgIn.timestamp;
     //parse msg
     let msgList = (""+msgIn.data).split("\n");
     for(let msg of msgList){
         try{
             // Inverted logic on serial port for usability
-            if(msgIn.fromSerial && msg.startsWith(">")) msg = msg.substring(1);// remove '>' to consider as variable
-            else if(msgIn.fromSerial && !msg.startsWith(">")) msg = ">:"+msg;// add '>' to consider as log
+            if(fromSerial && msg.startsWith(">")) msg = msg.substring(1);// remove '>' to consider as variable
+            else if(fromSerial && !msg.startsWith(">")) msg = ">:"+msg;// add '>' to consider as log
 
             // Command
             if(msg.startsWith("|")){
@@ -574,11 +849,12 @@ function exportSessionJSON() {
     });
     let now = new Date();
     let filename = `teleplot_${now.getFullYear()}-${now.getMonth()}-${now.getDate()}_${now.getHours()}-${now.getMinutes()}.json`;
-    
-    vscode.postMessage({ cmd: "saveFile", file: {
-        name: filename,
-        content: content
-    }});
+    if(vscode){
+        vscode.postMessage({ cmd: "saveFile", file: {
+            name: filename,
+            content: content
+        }});
+    }
 }
 
 function importSessionJSON(event) {
@@ -639,6 +915,13 @@ function computeStats(data) {
     if(values.length==0) return stats;
     // Sort
     let arr = values.slice().sort(function(a, b){return a - b;});
+    for(let i=0;i<arr.length;i++) {
+        if(!isFinite(arr[i]) || isNaN(arr[i])) {
+            arr.splice(i,1);
+            i--;
+        }
+    }
+    if(arr.length==0) return stats;
     // Min, Max
     stats.min = arr[0];
     stats.max = arr[arr.length-1];
@@ -703,30 +986,14 @@ function updateDisplayedVarValues(valueX, valueY){
     }
 }
 
-setInterval(()=>{
-    vscode.postMessage({ data: `|_telecmd_list_cmd|`});
-}, 3000);
-
-function parseVScmd(msg){
-    if(msg.cmd == "serialPortList"){
-        let filteredList = [];
-        for(let serial of msg.list){
-            if( serial.locationId
-             || serial.serialNumber
-             || serial.pnpId
-             || serial.vendorId
-             || serial.productId ){
-                filteredList.push(serial);
-            }
-        }
-        app.serialPortList = filteredList;
-    }
-    else if(msg.cmd == "serialPortConnect"){
-        app.serialPortConnected = true;
-    }
-    else if(msg.cmd == "serialPortDisconnect"){
-        app.serialPortConnected = false;
-    }
+if(vscode){
+    let conn = new ConnectionTeleplotVSCode();
+    conn.connect();
+    app.connections.push(conn);
 }
 
-vscode.postMessage({ cmd: "listSerialPorts"});
+setInterval(()=>{
+    for(let conn of app.connections){
+        conn.updateCMDList();
+    }
+}, 3000);

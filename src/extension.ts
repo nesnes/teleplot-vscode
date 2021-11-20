@@ -9,7 +9,7 @@ const CMD_UDP_PORT = 47268;
 
 const udp = require('dgram');
 
-var serial : any = null;
+var serials : any = {};
 var udpServer : any = null;
 var currentPanel:vscode.WebviewPanel;
 var _disposables: vscode.Disposable[] = [];
@@ -66,8 +66,10 @@ export function activate(context: vscode.ExtensionContext) {
 					if(x) x.dispose();
 				}
 				_disposables.length = 0;
-				if(serial) serial.close();
-				serial = null;
+				for(let s in serials){
+					serials[s].close();
+					serials[s] = null;
+				}
 				(currentPanel as any) = null;
 			}, null, _disposables);
 
@@ -104,33 +106,39 @@ function startTeleplotServer(){
 
 var dataBuffer = "";
 function runCmd(msg:any){
+	let id = ("id" in msg)?msg.id:"";
 	if(msg.cmd == "listSerialPorts"){
 		SerialPort.list().then((ports:any) => {
-			currentPanel.webview.postMessage({cmd: "serialPortList", list: ports});
+			currentPanel.webview.postMessage({id, cmd: "serialPortList", list: ports});
 		});
 	}
 	else if(msg.cmd == "connectSerialPort"){
-		serial = new SerialPort(msg.port, {baudRate: msg.baud});
-		serial.on('open', function() {
-			currentPanel.webview.postMessage({cmd: "serialPortConnect", port: msg.port, baud: msg.baud});
+		if(serials[id]) { //Already exists
+			serials[id].close();
+			delete serials[id];
+		}
+		serials[id] = new SerialPort(msg.port, {baudRate: msg.baud});
+		serials[id].on('open', function() {
+			currentPanel.webview.postMessage({id, cmd: "serialPortConnect", port: msg.port, baud: msg.baud});
 		})
-		serial.on('error', function(err:any) {
-			currentPanel.webview.postMessage({cmd: "serialPortError", port: msg.port, baud: msg.baud});
+		serials[id].on('error', function(err:any) {
+			currentPanel.webview.postMessage({id, cmd: "serialPortError", port: msg.port, baud: msg.baud});
 		})
 		
-		const parser = serial.pipe(new Readline({ delimiter: '\r\n' }));
+		const parser = serials[id].pipe(new Readline({ delimiter: '\r\n' }));
 		parser.on('data', function(data:any) {
-			currentPanel.webview.postMessage({data: data.toString(), fromSerial:true, timestamp: new Date().getTime()});
+			currentPanel.webview.postMessage({id, data: data.toString(), fromSerial:true, timestamp: new Date().getTime()});
 		})
-		serial.on('close', function(err:any) {
-			currentPanel.webview.postMessage({cmd: "serialPortDisconnect"});
+		serials[id].on('close', function(err:any) {
+			currentPanel.webview.postMessage({id, cmd: "serialPortDisconnect"});
 		})
 	}
 	else if(msg.cmd == "sendToSerial"){
-		serial.write(msg.text);
+		serials[id].write(msg.text);
 	}
 	else if(msg.cmd == "disconnectSerialPort"){
-		serial.close();
+		serials[id].close();
+		delete serials[id];
 	}
 	else if(msg.cmd == "saveFile"){
 		try {

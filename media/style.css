@@ -17,29 +17,47 @@ button {
 
 .top-banner {
 	display: flex;
+	flex-direction: row;
+	flex-wrap: wrap;
 	background-color: #2980b9;
-	padding-top: 3px;
-	padding-bottom: 3px;
+	padding-top: 0px;
+	padding-bottom: 0px;
 	padding-left: 10px;
 	padding-right: 10px;
 	color: white;
 	justify-content: space-between;
 	align-items: center;
-	height: 50px;
-}
-.top-banner > div {
-	min-width: 150px;
+	min-height: 50px;
 }
 
 .top-banner-left {
 	display: flex;
 	flex-direction: row;
     align-items: center;
+	height: 100%;
+    justify-content: flex-start;
+    width: 100%;
+    flex: 1;
 }
 
 .top-banner-title {
 	display: block;
 	font-size: 30px;
+}
+
+#session-json-input {
+	position: absolute;
+	width: 0px;
+	left: 0px;
+	opacity: 0;
+}
+
+.session-file-open {
+	background-color: #216490;
+    padding: 5px 10px 5px 10px;
+    color: white;
+    cursor: pointer;
+    border-radius: 50px;
 }
 
 body {
@@ -356,4 +374,136 @@ body {
 .serie-stat-name {
 	font-size: 9px;
 	color: #7f8c8d;
+}
+
+
+
+.connection-container {
+	display: flex;
+	flex-direction: row;
+	height: 100%;
+	flex-wrap: wrap;
+}
+
+.connection {
+	display: flex;
+	flex-direction: column;
+	margin: 2px 2px 2px 5px;
+}
+
+.connection-header {
+	font-size: 11px;
+    background-color: #216490;
+    padding: 0px 5px;
+    border-radius: 3px 3px 0px 0px;
+	display: flex;
+	flex-direction: row;
+	justify-content: space-between;
+}
+
+.connection-name {
+
+}
+
+.connection-button-container {
+	cursor: pointer;
+}
+
+.connection-button {
+    margin-left: 10px;
+}
+
+.connection-input-container {
+	display: flex;
+	flex-direction: row;
+	flex-wrap: wrap;
+    background-color: #2164909e;
+    border-radius: 0px 0px 5px 5px;
+    overflow: hidden;
+}
+
+.connection-input {
+	display: flex;
+    flex-direction: column;
+    font-size: 12px;
+    padding-left: 5px;
+    padding-right: 5px;
+    border-width: 2px 2px 2px 2px;
+    border-color: #216490;
+    border-style: solid;
+}
+
+.connection-input-header {
+	display: flex;
+	flex-direction: row;
+	justify-content: space-between;
+}
+
+.connection-input-name-container {
+	display: flex;
+	flex-direction: row;
+}
+
+.connection-input-name {
+	font-size: 12px;
+}
+
+.connection-input-status-not-connected {
+	background-color: #e74c3c;
+    padding: 1px 5px 1px 5px;
+    color: white;
+	font-size: 11px;
+    border-radius: 50px;
+}
+
+.connection-serial-input {
+	display: flex;
+	flex-direction: row;
+}
+
+.connection-serial-input-params {
+	display: flex;
+	flex-direction: row;	
+}
+
+.connection-serial-input-params > select {
+	font-size: 11px;
+}
+
+.connection-serial-buttons {
+	display: flex;
+	flex-direction: row;
+}
+
+.connection-serial-buttons > button {
+	padding: 0px 5px;
+    margin-left: 2px;
+}
+
+.connection-new-container {
+	display: flex;
+	flex-direction: column;
+	font-size: 12px;
+    margin-left: 10px;
+	align-items: center;
+	justify-content: center;
+}
+
+.connection-new-container > button {
+	background-color: #216490;
+	color: white;
+	border: 0;
+	height: 30px;
+	width: 30px;
+	border-radius: 15px;
+}
+
+.flex-row {
+	display: flex;
+	flex-direction: row;	
+}
+
+.flex-col {
+	display: flex;
+	flex-direction: column;	
 }
