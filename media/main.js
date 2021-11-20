@@ -849,11 +849,49 @@ function exportSessionJSON() {
     });
     let now = new Date();
     let filename = `teleplot_${now.getFullYear()}-${now.getMonth()}-${now.getDate()}_${now.getHours()}-${now.getMinutes()}.json`;
+    saveFile(content, filename);
+}
+
+function exportSessionCSV() {
+
+    let csv = "timestamp(ms),";
+    let dataList = [];
+    for(let key in app.telemetries) {
+        csv += key+",";
+        dataList.push(app.telemetries[key].data);
+    }
+    csv += "\n";
+    let joinedData = uPlot.join(dataList);
+
+    for(let i=0;i<joinedData[0].length;i++) {
+        for(let j=0;j<joinedData.length;j++) {
+            let value = joinedData[j][i];
+            if(isFinite(value) && !isNaN(value))
+                csv += '"'+(""+joinedData[j][i]).replace('.',',')+'"';
+            csv += ","
+        }
+        csv += "\n";
+    }
+    let now = new Date();
+    let filename = `teleplot_${now.getFullYear()}-${now.getMonth()}-${now.getDate()}_${now.getHours()}-${now.getMinutes()}.csv`;
+    saveFile(csv, filename);
+}
+
+function saveFile(content, filename) {
     if(vscode){
         vscode.postMessage({ cmd: "saveFile", file: {
             name: filename,
             content: content
         }});
+    }
+    else {
+        var element = document.createElement('a');
+        element.setAttribute('href', 'data:text/plain;charset=utf-8,' + encodeURIComponent(content));
+        element.setAttribute('download', filename);
+        element.style.display = 'none';
+        document.body.appendChild(element);
+        element.click();
+        document.body.removeChild(element);
     }
 }
 

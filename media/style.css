@@ -52,12 +52,15 @@ button {
 	opacity: 0;
 }
 
-.session-file-open {
+.header-button {
 	background-color: #216490;
     padding: 5px 10px 5px 10px;
     color: white;
     cursor: pointer;
     border-radius: 50px;
+    border: 0px;
+    font-size: 11px;
+    margin: 1px;
 }
 
 body {

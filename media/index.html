@@ -73,34 +73,40 @@
                         <div class="connection-new-container">
                             <button v-if="!creatingConnection" @click="creatingConnection=true">🞢</button>
                             <div v-if="creatingConnection">
-                                <input v-on:keyup.enter="createConnection()" type="text" placeholder="IP address" v-model="newConnectionAddress"/>
+                                <input v-on:keyup.enter="createConnection()" type="text" placeholder="IP of teleplot server" v-model="newConnectionAddress"/>
                                 <button @click="createConnection()">Connect</button>
+                                <button @click="creatingConnection=false">Cancel</button>
                             </div>
                         </div>
                     </div>
                 </div>
-                <div v-if="dataAvailable">
-                    <span title="Telemetry and logs ingest rate">{{(telemRate+logRate).toFixed(0)}}/s </span>
-                    <select v-model="viewDuration">
-                        <option value="0">no window</option>
-                        <option value="1">1 second</option>
-                        <option value="5">5 seconds</option>
-                        <option value="15">15 seconds</option>
-                        <option value="30">30 seconds</option>
-                        <option value="60">1 minute</option>
-                        <option value="300">5 minutes</option>
-                        <option value="900">15 minutes</option>
-                        <option value="1800">30 minutes</option>
-                        <option value="3600">1 hour</option>
-                        <option value="21600">6 hours</option>
-                        <option value="43200">12 hours</option>
-                        <option value="86400">1 day</option>
-                     </select>
-                    <button onclick="exportSessionJSON()">Download</button>
-                    <button @click="clearAll()">Clear</button>
+                <div v-if="dataAvailable" class="flex-row">
+                    <div class="flex-col">
+                        <span title="Telemetry and logs ingest rate">{{(telemRate+logRate).toFixed(0)}}/s </span>
+                        <select v-model="viewDuration">
+                            <option value="0">no window</option>
+                            <option value="1">1 second</option>
+                            <option value="5">5 seconds</option>
+                            <option value="15">15 seconds</option>
+                            <option value="30">30 seconds</option>
+                            <option value="60">1 minute</option>
+                            <option value="300">5 minutes</option>
+                            <option value="900">15 minutes</option>
+                            <option value="1800">30 minutes</option>
+                            <option value="3600">1 hour</option>
+                            <option value="21600">6 hours</option>
+                            <option value="43200">12 hours</option>
+                            <option value="86400">1 day</option>
+                        </select>
+                     </div>
+                     <div class="flex-col">
+                        <button onclick="exportSessionJSON()" class="header-button">🖫 Save as JSON</button>
+                        <button onclick="exportSessionCSV()" class="header-button">➦ Export to CSV</button>
+                    </div>
+                    <button @click="clearAll()" class="header-button">Clear</button>
                 </div>
                 <div v-else>
-                    <label for="session-json-input" class="session-file-open">🗁 Open file</label>
+                    <label for="session-json-input" class="header-button">🗁 Open JSON</label>
                     <input type="file" onchange="importSessionJSON(event)" id="session-json-input" />
                 </div>
             </header>
