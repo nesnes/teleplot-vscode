@@ -2,7 +2,7 @@
 {
 	"name": "teleplot",
 	"description": "Teleplot - Ridiculously-simple telemetry viewer.",
-	"version": "1.0.4",
+	"version": "1.0.5",
 	"publisher": "alexnesnes",
 	"private": true,
 	"license": "MIT",
