@@ -80,6 +80,12 @@ var app = new Vue({
         onDropInWidget: function(e, widget){            
             widget.draggedOver = false;
             let telemetryName = e.dataTransfer.getData("telemetryName");
+            let newIsXY = app.telemetries[telemetryName].xy;
+            let chartIsXY = (widget.series.length
+                && widget.series[0].sourceNames.length
+                && app.telemetries[widget.series[0].sourceNames[0]].xy
+            );
+            if(newIsXY != chartIsXY) return;
             let serie = new DataSerie(telemetryName);
             serie.sourceNames = [telemetryName];
             widget.addSerie(serie);
@@ -105,7 +111,7 @@ var app = new Vue({
         onDropInNewChart: function(e){            
             newChartDropZoneOver = false;
             let telemetryName = e.dataTransfer.getData("telemetryName");
-            let chart = new ChartWidget();
+            let chart = new ChartWidget(!!app.telemetries[telemetryName].xy);
             let serie = new DataSerie(telemetryName);
             serie.sourceNames = [telemetryName];
             chart.addSerie(serie);
@@ -252,6 +258,28 @@ var defaultPlotOpts = {
     legend: {
         show: false
     }
+};
+
+const drawXYPoints = (u, seriesIdx, idx0, idx1) => {
+    const size = 5 * devicePixelRatio;
+    uPlot.orient(u, seriesIdx, (series, dataX, dataY, scaleX, scaleY, valToPosX, valToPosY, xOff, yOff, xDim, yDim, moveTo, lineTo, rect, arc) => {
+        let d = u.data[seriesIdx];
+        u.ctx.fillStyle = series.stroke();
+        let deg360 = 2 * Math.PI;
+        let p = new Path2D();
+        for (let i = 0; i < d[0].length; i++) {
+            let xVal = d[0][i];
+            let yVal = d[1][i];
+            if (xVal >= scaleX.min && xVal <= scaleX.max && yVal >= scaleY.min && yVal <= scaleY.max) {
+                let cx = valToPosX(xVal, scaleX, xDim, xOff);
+                let cy = valToPosY(yVal, scaleY, yDim, yOff);
+                p.moveTo(cx + size/2, cy);
+                arc(p, cx, cy, size/2, 0, deg360);
+            }
+        }
+        u.ctx.fill(p);
+    });
+    return null;
 };
 
 var ConnectionCount = 0;
@@ -585,8 +613,9 @@ class DataWidget{
 }
 
 class ChartWidget extends DataWidget{
-    constructor() {
+    constructor(_isXY=false) {
         super();
+        this.isXY = _isXY;
         this.data = [[]];
         this.options = {
             title: "",
@@ -602,6 +631,12 @@ class ChartWidget extends DataWidget{
             },
             legend: { show: false }
         }
+        if(this.isXY) {
+            this.data[0] = null;
+            this.options.mode = 2;
+            delete this.options.cursor;
+            this.options.scales.x.time = false;
+        }
         this.forceUpdate = true;
     }
 
@@ -609,9 +644,9 @@ class ChartWidget extends DataWidget{
         _serie.options._serie = _serie.name;
         _serie.options.stroke = ColorPalette.getColor(this.series.length).toString();
         _serie.options.fill = ColorPalette.getColor(this.series.length, 0.1).toString();
+        if(this.isXY) _serie.options.paths = drawXYPoints;
         this.options.series.push(_serie.options);
         _serie.dataIdx = this.data.length;
-        //this.data.push([]);
         this.series.push(_serie);
         this.forceUpdate = true;
     }
@@ -619,8 +654,29 @@ class ChartWidget extends DataWidget{
     update(){
         // Update each series
         for(let s of this.series) s.update();
-        //Create data with common x axis
-        if(this.data[0].length==0 || this.forceUpdate) {
+        if(this.isXY){
+            if(this.forceUpdate) {
+                this.data.length = 0;
+                this.data.push(null);
+                for(let s of this.series){
+                    s.dataIdx = this.data.length;
+                    this.data.push(s.data);
+                }
+                this.id += "-" //dummy way to force update
+                triggerChartResize();
+                this.forceUpdate = false;
+            }
+            else {
+                for(let s of this.series) {
+                    if(s.pendingData[0].length==0) continue;
+                    for(let i=0;i<this.data[s.dataIdx].length;i++){
+                        this.data[s.dataIdx][i].push(...s.pendingData[i]);
+                    }
+                }
+            }
+        }
+        else if(this.data[0].length==0 || this.forceUpdate) {
+            //Create data with common x axis
             let dataList = [];
             for(let s of this.series) dataList.push(s.data);
             this.data.length = 0;
@@ -638,11 +694,10 @@ class ChartWidget extends DataWidget{
                 for(let i=0;i<pending.length;i++){
                     this.data[i].push(...pending[i]);
                 }
-                   // Vue.set(widgets, "data", this.data);
             }
         }        
         //Clear older data from viewDuration
-        if(parseFloat(app.viewDuration)>0)
+        if(!this.isXY && parseFloat(app.viewDuration)>0)
         {
             let latestTimestamp = this.data[0][this.data[0].length-1];
             let minTimestamp = latestTimestamp - parseFloat(app.viewDuration);
@@ -697,8 +752,6 @@ function parseData(msgIn){
                 currLog.timestamp = parseFloat(msg.substr(1, logStart-2));
                 if(isNaN(currLog.timestamp) || !isFinite(currLog.timestamp)) currLog.timestamp = now;
                 logBuffer.unshift(currLog);//prepend log to buffer
-
-                //logs.unshift(msg.substr(1));//prepend log to list
             }
             // Data
             else {
@@ -746,7 +799,9 @@ function appendData(key, valuesX, valuesY, flags) {
         config.name = key;
         config.scales.x.time = isTimeBased;
         if(!isTimeBased){
+            config.mode = 2;
             config.cursor.sync = undefined;
+            config.series[1].paths = drawXYPoints;
         }
         var obj = {
             name: key,
@@ -754,12 +809,13 @@ function appendData(key, valuesX, valuesY, flags) {
             data: [[],[]],
             pendingData: [[],[]],
             value: 0,
-            config: config
+            config: config,
+            xy: !isTimeBased
         };
         Vue.set(app.telemetries, key, obj)
         // Create widget
         if(shouldPlot){
-            let chart = new ChartWidget();
+            let chart = new ChartWidget(!isTimeBased);
             let serie = new DataSerie(key);
             serie.sourceNames = [key];
             chart.addSerie(serie);
@@ -775,6 +831,9 @@ function appendData(key, valuesX, valuesY, flags) {
     telemBuffer[key].data[0].push(...valuesX);
     telemBuffer[key].data[1].push(...valuesY);
     telemBuffer[key].value = valuesY[valuesY.length-1];
+    if(app.telemetries[key].xy) {
+        telemBuffer[key].value = ""+valuesX[valuesX.length-1].toFixed(4)+" "+valuesY[valuesY.length-1].toFixed(4)+"";
+    }
     return;
 }
 
@@ -795,7 +854,7 @@ function updateView() {
         app.telemetries[key].data[1].push(...telemBuffer[key].data[1]);
         app.telemetries[key].pendingData[0].push(...telemBuffer[key].data[0]);
         app.telemetries[key].pendingData[1].push(...telemBuffer[key].data[1]);
-        app.telemetries[key].value = telemBuffer[key].value
+        app.telemetries[key].value = telemBuffer[key].value;
         telemBuffer[key].data[0].length = 0;
         telemBuffer[key].data[1].length = 0;
     }
@@ -809,7 +868,6 @@ function updateView() {
             let minIdx = findClosestLowerByIdx(data[0], minTimestamp);
             if(data[0][minIdx]<minTimestamp) minIdx += 1;
             else continue;
-            //if(minIdx>=data[0].length) break;
             app.telemetries[key].data[0].splice(0, minIdx);
             app.telemetries[key].data[1].splice(0, minIdx);
         }
@@ -1006,6 +1064,7 @@ function findClosestLowerByIdx(arr, n) {
     let telemList = Object.keys(app.telemetries);
     for(let telemName of telemList) {
         let telem = app.telemetries[telemName];
+        if(telem.xy) continue;
         let idx = telem.data[0].length-1;
         if(0 <= idx && idx < telem.data[0].length) {
             telem.value = telem.data[1][idx];
@@ -1017,6 +1076,7 @@ function updateDisplayedVarValues(valueX, valueY){
     let telemList = Object.keys(app.telemetries);
     for(let telemName of telemList) {
         let telem = app.telemetries[telemName];
+        if(telem.xy) continue;
         let idx = findClosestLowerByIdx(telem.data[0], valueX);
         if(idx < telem.data[0].length) {
             telem.value = telem.data[1][idx];
