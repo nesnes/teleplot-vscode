@@ -25,7 +25,7 @@ var app = new Vue({
         logRate: 0,
         viewDuration: 15,
         leftPanelVisible: true,
-        rightPanelVisible: true,
+        rightPanelVisible: false,
         textToSend: "",
         sendTextLineEnding: "\\r\\n",
         newChartDropZoneOver: false,
@@ -123,7 +123,7 @@ var app = new Vue({
         onDropInNewChart: function(e, prepend=true){      
             e.preventDefault();
             e.stopPropagation();      
-            newChartDropZoneOver = false;
+            app.newChartDropZoneOver = false;
             let telemetryName = e.dataTransfer.getData("telemetryName");
             let chart = new ChartWidget(!!app.telemetries[telemetryName].xy);
             let serie = new DataSerie(telemetryName);
@@ -134,11 +134,11 @@ var app = new Vue({
         },
         onNewChartDragOver: function(e){
             e.preventDefault();
-            newChartDropZoneOver = true;
+            app.newChartDropZoneOver = true;
         },
         onNewChartDragLeave: function(e){
             e.preventDefault();
-            newChartDropZoneOver = false;
+            app.newChartDropZoneOver = false;
         },
         createConnection: function(address_=undefined, port_=undefined){
             let conn = new ConnectionTeleplotWebsocket();
@@ -176,6 +176,21 @@ var app = new Vue({
         isWidgetSmallOnGrid: function(widget){
             if(widget.gridPos.w < 3) return true;
             if(widget.gridPos.w < 5 && widget.series.length > 1) return true;
+            return false;
+        },
+        shouldShowRightPanelButton: function(){
+            if(app.rightPanelVisible) return false;
+            if(app.cmdAvailable || app.logAvailable) return true;
+            // Show with connected serial inputs
+            for(let conn of app.connections){
+                if(conn.connected){
+                    for(let input of conn.inputs){
+                        if(input.type == "serial" && input.connected){
+                            return true;
+                        }
+                    }
+                }
+            }
             return false;
         }
     }
@@ -262,6 +277,9 @@ logCursor = {
 var timestampWindow = {min:0, max:0};
 window.cursorSync = uPlot.sync("cursorSync");
 window.cursorSync.sub({ pub:function(type, self, x, y, w, h, i){
+    if(type=="mouseup"){
+        app.isViewPaused = true;
+    }
     if(type=="mousemove"){
         if(i != -42){
             let timestamp = self.cursor.sync.values[0];
@@ -668,7 +686,7 @@ class DataSerie{
     update(){
         this.applyTimeWindow();
         // no formula, simple data reference
-        if(this.formula=="" && this.sourceNames.length==1){
+        if(this.formula=="" && this.sourceNames.length==1 && app.telemetries[this.sourceNames[0]]){
             let isXY = app.telemetries[this.sourceNames[0]].xy;
             this.data[0] = app.telemetries[this.sourceNames[0]].data[0];
             this.data[1] = app.telemetries[this.sourceNames[0]].data[1];
@@ -687,6 +705,7 @@ class DataSerie{
     applyTimeWindow(){
         if(parseFloat(app.viewDuration)<=0) return;
         for(let key of this.sourceNames) {
+            if(app.telemetries[key] == undefined) continue;
             let d = app.telemetries[key].data;
             let timeIdx = 0;
             if(app.telemetries[key].xy) timeIdx = 2;
@@ -735,6 +754,7 @@ class ChartWidget extends DataWidget{
         super();
         this.isXY = _isXY;
         this.data = [];
+        this.updatedForZeroLength = false;
         this.options = {
             title: "",
             width: 400,
@@ -799,7 +819,7 @@ class ChartWidget extends DataWidget{
                 }
             }
         }
-        else if(this.data[0].length==0 || this.forceUpdate) {
+        else if((this.data[0].length==0 && !this.updatedForZeroLength) || this.forceUpdate) {
             //Create data with common x axis
             let dataList = [];
             for(let s of this.series) dataList.push(s.data);
@@ -808,6 +828,7 @@ class ChartWidget extends DataWidget{
             this.id += "-" //dummy way to force update
             triggerChartResize();
             this.forceUpdate = false;
+            this.updatedForZeroLength = true; // Avoid constant update of widget with no data
         }
         else {
             //Iterate on all series, adding timestamps and values
@@ -815,6 +836,7 @@ class ChartWidget extends DataWidget{
             for(let s of this.series) dataList.push(s.data);
             this.data.length = 0;
             this.data.push(...uPlot.join(dataList));
+            if(this.data[0].length>0) this.updatedForZeroLength = false;
         }
     }
 }

@@ -72,6 +72,10 @@ button {
 	margin-right: 10px;
 }
 
+.play-pause-button-paused {
+	background-color: #2ecc71;
+}
+
 body {
 	margin: 0px;
 	padding: 0px;
@@ -89,6 +93,7 @@ body {
 .center-col {
 	min-width: min(400px, 50%);
 	flex: 3;
+	padding-bottom: 100px;
 }
 .right-col {
 	min-width: min(350px, max(250px, 30%));

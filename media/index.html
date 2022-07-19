@@ -81,7 +81,7 @@
                     </div>
                 </div>
                 <div v-if="dataAvailable" class="flex-row" style="align-items: center;">
-                    <button @click="isViewPaused = !isViewPaused" class="header-button play-pause-button" style="width:34px;height:34px">
+                    <button @click="isViewPaused = !isViewPaused" class="header-button play-pause-button" style="width:34px;height:34px" v-bind:class="{ 'play-pause-button-paused': isViewPaused }">
                         <span v-if="!isViewPaused">⏸</span>
                         <span v-if="isViewPaused">▶</span>
                     </button>
@@ -216,52 +216,21 @@
                             <uplot-vue v-if="widget.type == 'chart'" v-bind:data="widget.data" v-bind:options="widget.options"/>
                         </div>
                     </div>
-                    <!-- PLOTS -->
-                    <!--<div class="telem-container">
-                        <div v-for="telem in telemetries" v-bind:key="'telem-'+telem.name" class="telem-vue" v-if="telem.visible">
-                            <div class="telem-vue-header">
-                                <div class="telem-stat">
-                                    <span class="telem-stat-name">Name</span>
-                                    <span class="telem-stat-value">{{telem.name}}</span>
-                                </div>
-                                <div class="telem-stat">
-                                    <span class="telem-stat-name">Value</span>
-                                    <span class="telem-stat-value" v-if="telem.value != null">{{telem.value.toFixed(4)}}</span>
-                                </div>
-                                <div v-if="telem.stats" class="telem-stat">
-                                    <span class="telem-stat-name">Mean</span>
-                                    <span class="telem-stat-value" v-if="telem.stats.mean != null">{{telem.stats.mean.toFixed(4)}}</span>
-                                </div>
-                                <div v-if="telem.stats"  class="telem-stat">
-                                    <span class="telem-stat-name">Median</span>
-                                    <span class="telem-stat-value" v-if="telem.stats.med != null">{{telem.stats.med.toFixed(4)}}</span>
-                                </div>
-                                <div v-if="telem.stats"  class="telem-stat">
-                                    <span class="telem-stat-name">Stdev</span>
-                                    <span class="telem-stat-value" v-if="telem.stats.stdev != null">{{telem.stats.stdev.toFixed(4)}}</span>
-                                </div>
-                                <div class="">
-                                    <button @click="updateStats(telem)">stats</button>
-                                </div>
-                            </div>
-                            <uplot-vue v-bind:data="telem.data" v-bind:options="telem.config"/>
-                        </div>
-                    </div>-->
                 </div>
 
                 <!-- CMD update to multi input-->
 
-                <div class="var-container" v-if="!rightPanelVisible">
+                <div class="var-container" v-if="shouldShowRightPanelButton()">
                     <button @click="showRightPanel(true)" class="right-rounded-btn"><</button>
                 </div>
-                <div class="right-col cmd-container" v-if="(cmdAvailable || logAvailable) && rightPanelVisible">
+                <div class="right-col cmd-container" v-if="rightPanelVisible">
                     <button @click="showRightPanel(false)" class="right-reduce-btn" >Reduce</button>
                     <div v-for="cmd in commands" v-bind:key="cmd.name" class="cmd-vue">
                         <button @click="sendCmd(cmd)">{{cmd.name}}</button>
                     </div>
 
                     <!-- LOG TODO update to multi input-->
-                    <div class="log-container" v-if="logAvailable">
+                    <div class="log-container">
                         <span v-for="(log, index) in logs" v-bind:key="index" class="log-vue" @click="onLogClick(log, index)"
                             v-bind:class="{ 'log-vue-selected': log.selected }">
                             {{log.text}}
