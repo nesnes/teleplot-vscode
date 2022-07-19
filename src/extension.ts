@@ -1,7 +1,8 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
-const { SerialPort } = require('node-usb-native');
+import { ReadlineParser } from 'serialport';
+const { SerialPort } = require('serialport')//require('node-usb-native');
 const Readline = require('@serialport/parser-readline')
 
 const UDP_PORT = 47269;
@@ -117,15 +118,18 @@ function runCmd(msg:any){
 			serials[id].close();
 			delete serials[id];
 		}
-		serials[id] = new SerialPort(msg.port, {baudRate: msg.baud});
-		serials[id].on('open', function() {
-			currentPanel.webview.postMessage({id, cmd: "serialPortConnect", port: msg.port, baud: msg.baud});
-		})
-		serials[id].on('error', function(err:any) {
-			currentPanel.webview.postMessage({id, cmd: "serialPortError", port: msg.port, baud: msg.baud});
+		serials[id] = new SerialPort({baudRate: msg.baud, path: msg.port}, function(err: any) {
+			if(err) {
+				console.log("erroror");
+				currentPanel.webview.postMessage({id, cmd: "serialPortError", port: msg.port, baud: msg.baud});
+			}
+			else {
+				console.log("open");
+				currentPanel.webview.postMessage({id, cmd: "serialPortConnect", port: msg.port, baud: msg.baud});
+			}
 		})
 		
-		const parser = serials[id].pipe(new Readline({ delimiter: '\r\n' }));
+		const parser = serials[id].pipe(new ReadlineParser({ delimiter: '\r\n' }));
 		parser.on('data', function(data:any) {
 			currentPanel.webview.postMessage({id, data: data.toString(), fromSerial:true, timestamp: new Date().getTime()});
 		})

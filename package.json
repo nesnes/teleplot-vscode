@@ -1,8 +1,7 @@
-
 {
 	"name": "teleplot",
 	"description": "Teleplot - Ridiculously-simple telemetry viewer.",
-	"version": "1.0.5",
+	"version": "1.0.7",
 	"publisher": "alexnesnes",
 	"private": true,
 	"license": "MIT",
@@ -30,8 +29,8 @@
 				"title": "Start teleplot session",
 				"category": "teleplot",
 				"icon": {
-				  "light": "media/images/logo-color.svg",
-				  "dark": "media/images/logo-color.svg"
+					"light": "media/images/logo-color.svg",
+					"dark": "media/images/logo-color.svg"
 				}
 			}
 		]
@@ -45,7 +44,9 @@
 	},
 	"dependencies": {
 		"dgram": "^1.0.1",
-		"node-usb-native": "^0.0.20"
+		"node-usb-native": "^0.0.20",
+		"serialport": "^10.4.0",
+		"vsce": "^2.9.2"
 	},
 	"devDependencies": {
 		"@types/node": "^12.12.0",
