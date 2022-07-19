@@ -23,14 +23,16 @@ var app = new Vue({
         logAvailable: false,
         telemRate: 0,
         logRate: 0,
-        viewDuration: 0,
+        viewDuration: 15,
         leftPanelVisible: true,
         rightPanelVisible: true,
         textToSend: "",
         sendTextLineEnding: "\\r\\n",
         newChartDropZoneOver: false,
         newConnectionAddress: "",
-        creatingConnection: false
+        creatingConnection: false,
+        telemetryFilterString: "",
+        isViewPaused: false
     },
     methods: {
         updateStats: function(widget){
@@ -38,7 +40,11 @@ var app = new Vue({
             //Vue.set(telem, "stats", computeStats(telem.data))
         },
         sendCmd: function(cmd) {
-            socket.send(`|${cmd.name}|`);
+            let command = `|${cmd.name}|`;
+            if("params" in cmd) command += `${cmd.params}|`;
+            for(let conn of app.connections){
+                conn.sendServerCommand({ id: this.id, cmd: command});
+            }
         },
         onLogClick: function(log, index) {
             for(l of app.logs) l.selected = log.timestamp > 0 && l.timestamp == log.timestamp;
@@ -53,6 +59,9 @@ var app = new Vue({
             triggerChartResize();
         },
         clearAll: function() {
+            for(let w of widgets) w.destroy();
+            widgets.length = 0;
+            Vue.set(app, 'widgets', widgets);
             logs.length = 0;
             Vue.set(app, 'logs', logs);
             logBuffer.length = 0;
@@ -61,11 +70,11 @@ var app = new Vue({
             commands = {};
             Vue.set(app, 'commands', commands);
             telemBuffer = {};
-            widgets.length = 0;
-            Vue.set(app, 'widgets', widgets);
             app.dataAvailable = false;
             app.cmdAvailable = false;
             app.logAvailable = false;
+            app.isViewPaused = false;
+            app.telemetryFilterString = "";
         },
         sendText: function(text) {
             let escape = app.sendTextLineEnding.replace("\\n","\n");
@@ -77,7 +86,9 @@ var app = new Vue({
             e.dataTransfer.effectAllowed = 'copy'
             e.dataTransfer.setData("telemetryName", telemetryName);
         },
-        onDropInWidget: function(e, widget){            
+        onDropInWidget: function(e, widget){
+            e.preventDefault();
+            e.stopPropagation();
             widget.draggedOver = false;
             let telemetryName = e.dataTransfer.getData("telemetryName");
             let newIsXY = app.telemetries[telemetryName].xy;
@@ -87,7 +98,7 @@ var app = new Vue({
             );
             if(newIsXY != chartIsXY) return;
             let serie = new DataSerie(telemetryName);
-            serie.sourceNames = [telemetryName];
+            serie.addSource(telemetryName);
             widget.addSerie(serie);
         },
         onWidgetDragOver: function(e, widget){
@@ -104,18 +115,22 @@ var app = new Vue({
             triggerChartResize();
         },
         removeWidget: function(widget){
+            widget.destroy();
             let idx = widgets.findIndex((w)=>w.id==widget.id);
             if(idx>=0) app.widgets.splice(idx, 1);
             triggerChartResize();
         },
-        onDropInNewChart: function(e){            
+        onDropInNewChart: function(e, prepend=true){      
+            e.preventDefault();
+            e.stopPropagation();      
             newChartDropZoneOver = false;
             let telemetryName = e.dataTransfer.getData("telemetryName");
             let chart = new ChartWidget(!!app.telemetries[telemetryName].xy);
             let serie = new DataSerie(telemetryName);
-            serie.sourceNames = [telemetryName];
+            serie.addSource(telemetryName);
             chart.addSerie(serie);
-            widgets.unshift(chart); // prepend chart
+            if(prepend) widgets.unshift(chart);
+            else widgets.push(chart);
         },
         onNewChartDragOver: function(e){
             e.preventDefault();
@@ -125,10 +140,10 @@ var app = new Vue({
             e.preventDefault();
             newChartDropZoneOver = false;
         },
-        createConnection: function(){
+        createConnection: function(address_=undefined, port_=undefined){
             let conn = new ConnectionTeleplotWebsocket();
-            let addr = app.newConnectionAddress;
-            let port = 8080;
+            let addr = address_ || app.newConnectionAddress;
+            let port = port_ || 8080;
             if(addr.includes(":")) {
                 port = parseInt(addr.split(":")[1]);
                 addr = addr.split(":")[0];
@@ -146,9 +161,43 @@ var app = new Vue({
                     break;
                 }
             }
+        },
+        isMatchingTelemetryFilter: function(name){
+            if(app.telemetryFilterString == "") return true;
+            let escapeRegex = (str) => str.replace(/([.*+?^=!:${}()|\[\]\/\\])/g, "\\$1");
+            let rule = app.telemetryFilterString.split("*").map(escapeRegex).join(".*");
+            rule = "^" + rule + "$";
+            let regex = new RegExp(rule);
+            return regex.test(name);
+        },
+        updateWidgetSize: function(widget){
+            updateWidgetSize_(widget);
+        },
+        isWidgetSmallOnGrid: function(widget){
+            if(widget.gridPos.w < 3) return true;
+            if(widget.gridPos.w < 5 && widget.series.length > 1) return true;
+            return false;
         }
     }
 })
+
+function updateWidgetSize_(widget){
+    const clamp = (num, min, max) => Math.min(Math.max(num, min), max);
+    widget.gridPos.w = clamp(widget.gridPos.w, 1, 12);
+    widget.gridPos.h = clamp(widget.gridPos.h, 1, 20);
+    widget.options.height = (widget.gridPos.h-1)*50;
+    widget.forceUpdate = true;
+    triggerChartResize();
+}
+
+function sendCommand(cmd) {
+    let command = `|${cmd.name}|`;
+    if("params" in cmd) command += `${cmd.params}|`;
+    for(let conn of app.connections){
+        conn.sendServerCommand({ id: this.id, cmd: command});
+    }
+}
+
 function rgba(r,g,b,a){
     return {r,g,b,a, toString: function(){ return `rgba(${this.r},${this.g},${this.b},${this.a})`}};
 }
@@ -266,18 +315,38 @@ const drawXYPoints = (u, seriesIdx, idx0, idx1) => {
         let d = u.data[seriesIdx];
         u.ctx.fillStyle = series.stroke();
         let deg360 = 2 * Math.PI;
-        let p = new Path2D();
+        let strokeStylebackup = u.ctx.strokeStyle;
+        let lineWidthbackup = u.ctx.lineWidth;
+        //let p = new Path2D();
+        let lastX=0, lastY=0;
         for (let i = 0; i < d[0].length; i++) {
             let xVal = d[0][i];
             let yVal = d[1][i];
             if (xVal >= scaleX.min && xVal <= scaleX.max && yVal >= scaleY.min && yVal <= scaleY.max) {
                 let cx = valToPosX(xVal, scaleX, xDim, xOff);
                 let cy = valToPosY(yVal, scaleY, yDim, yOff);
-                p.moveTo(cx + size/2, cy);
-                arc(p, cx, cy, size/2, 0, deg360);
+                /*p.moveTo(cx + size/2, cy);
+                arc(p, cx, cy, size/2, 0, deg360);*/
+                u.ctx.beginPath();
+                u.ctx.globalAlpha = (1.0/d[0].length)*i;
+                u.ctx.fillStyle = series.stroke();
+                u.ctx.strokeStyle = series.stroke();
+                u.ctx.lineWidth = 1*devicePixelRatio;
+                if(i>0){
+                    u.ctx.moveTo(lastX, lastY);
+                    u.ctx.lineTo(cx, cy);
+                    u.ctx.stroke();
+                }
+                u.ctx.beginPath();
+                u.ctx.ellipse(cx, cy, size/2, size/2, 0, 0, deg360);
+                u.ctx.fill();
+
+                lastX = cx;
+                lastY = cy;
             }
         }
-        u.ctx.fill(p);
+        u.ctx.strokeStyle = strokeStylebackup;
+        u.ctx.lineWidth = lineWidthbackup;
     });
     return null;
 };
@@ -362,6 +431,12 @@ class ConnectionTeleplotVSCode extends Connection{
         this.vscode.postMessage(command);
     }
 
+    sendCommand(command) {
+        for(let input of this.inputs){
+            input.sendCommand(command);
+        }
+    }
+
     updateCMDList() {
         for(let input of this.inputs){
             input.updateCMDList();
@@ -408,6 +483,9 @@ class ConnectionTeleplotWebsocket extends Connection{
             for(let input of this.inputs){
                 input.disconnect();
             }
+            setTimeout(()=>{
+                this.connect(this.address, this.port);
+            }, 2000);
         };
         this.socket.onmessage = (msgWS) => {
             let msg = JSON.parse(msgWS.data);
@@ -434,8 +512,7 @@ class ConnectionTeleplotWebsocket extends Connection{
     }
 
     sendServerCommand(command){
-        if(this.socket)
-            this.socket.send(JSON.stringify(command));
+        if(this.socket) this.socket.send(JSON.stringify(command));
     }
 
     updateCMDList(){
@@ -484,8 +561,12 @@ class DataInputUDP extends DataInput{
         }
     }
 
+    sendCommand(command){
+        this.connection.sendServerCommand({ id: this.id, cmd: command});
+    }
+
     updateCMDList(){
-        this.connection.sendServerCommand({ id: this.id, data: `|_telecmd_list_cmd|`});
+        this.sendCommand("|_telecmd_list_cmd|");
     }
 }
 
@@ -530,6 +611,7 @@ class DataInputSerial extends DataInput{
             }
             else if(msg.cmd == "serialPortConnect"){
                 this.connected = true;
+                app.showRightPanel(true);
             }
             else if(msg.cmd == "serialPortDisconnect"){
                 this.connected = false;
@@ -539,6 +621,10 @@ class DataInputSerial extends DataInput{
 
     listPorts(){
         this.connection.sendServerCommand({ id: this.id, cmd: "listSerialPorts"});
+    }
+
+    sendCommand(){
+        //nope
     }
 
     updateCMDList(){
@@ -567,13 +653,29 @@ class DataSerie{
         this.stats = null;
     }
 
+    destroy(){
+        for(let name of this.sourceNames){
+            onTelemetryUnused(name);
+        }
+        this.sourceNames.length = 0;
+    }
+
+    addSource(name){
+        this.sourceNames.push(name);
+        onTelemetryUsed(name);
+    }
+
     update(){
+        this.applyTimeWindow();
         // no formula, simple data reference
         if(this.formula=="" && this.sourceNames.length==1){
+            let isXY = app.telemetries[this.sourceNames[0]].xy;
             this.data[0] = app.telemetries[this.sourceNames[0]].data[0];
             this.data[1] = app.telemetries[this.sourceNames[0]].data[1];
+            if(isXY) this.data[2] = app.telemetries[this.sourceNames[0]].data[2];
             this.pendingData[0] = app.telemetries[this.sourceNames[0]].pendingData[0];
             this.pendingData[1] = app.telemetries[this.sourceNames[0]].pendingData[1];
+            if(isXY) this.pendingData[2] = app.telemetries[this.sourceNames[0]].pendingData[2];
             this.value = app.telemetries[this.sourceNames[0]].value;
         }
     }
@@ -581,15 +683,31 @@ class DataSerie{
     updateStats(){
         this.stats = computeStats(this.data);
     }
+
+    applyTimeWindow(){
+        if(parseFloat(app.viewDuration)<=0) return;
+        for(let key of this.sourceNames) {
+            let d = app.telemetries[key].data;
+            let timeIdx = 0;
+            if(app.telemetries[key].xy) timeIdx = 2;
+            let latestTimestamp = d[timeIdx][d[timeIdx].length-1];
+            let minTimestamp = latestTimestamp - parseFloat(app.viewDuration);
+            let minIdx = findClosestLowerByIdx(d[timeIdx], minTimestamp);
+            if(d[timeIdx][minIdx]<minTimestamp) minIdx += 1;
+            else continue;
+            app.telemetries[key].data[0].splice(0, minIdx);
+            app.telemetries[key].data[1].splice(0, minIdx);
+            if(app.telemetries[key].xy) app.telemetries[key].data[2].splice(0, minIdx);
+        }
+    }
 }
 
-var DataWidgetIdCount = 0;
 class DataWidget{
     constructor() {
         this.series = []; // DataSerie
         this.type = "chart";
-        this.id = "widget-chart-" + DataWidgetIdCount++;
-        this.gridPos = {h:3, w:3, x:0, y:0};   
+        this.id = "widget-chart-" + (Math.random() + 1).toString(36).substring(7);
+        this.gridPos = {h:6, w:6, x:0, y:0};   
     }
 
     isUsingSource(name){
@@ -616,7 +734,7 @@ class ChartWidget extends DataWidget{
     constructor(_isXY=false) {
         super();
         this.isXY = _isXY;
-        this.data = [[]];
+        this.data = [];
         this.options = {
             title: "",
             width: 400,
@@ -632,12 +750,15 @@ class ChartWidget extends DataWidget{
             legend: { show: false }
         }
         if(this.isXY) {
-            this.data[0] = null;
+            this.data.push(null);
             this.options.mode = 2;
             delete this.options.cursor;
             this.options.scales.x.time = false;
         }
         this.forceUpdate = true;
+    }
+    destroy(){
+        for(let s of this.series) s.destroy();
     }
 
     addSerie(_serie){
@@ -647,6 +768,7 @@ class ChartWidget extends DataWidget{
         if(this.isXY) _serie.options.paths = drawXYPoints;
         this.options.series.push(_serie.options);
         _serie.dataIdx = this.data.length;
+        this.data.push([]);
         this.series.push(_serie);
         this.forceUpdate = true;
     }
@@ -654,6 +776,8 @@ class ChartWidget extends DataWidget{
     update(){
         // Update each series
         for(let s of this.series) s.update();
+        if(app.isViewPaused) return;
+
         if(this.isXY){
             if(this.forceUpdate) {
                 this.data.length = 0;
@@ -688,32 +812,15 @@ class ChartWidget extends DataWidget{
         else {
             //Iterate on all series, adding timestamps and values
             let dataList = [];
-            for(let s of this.series) dataList.push(s.pendingData);
-            let pending = uPlot.join(dataList);
-            if(pending[0].length){
-                for(let i=0;i<pending.length;i++){
-                    this.data[i].push(...pending[i]);
-                }
-            }
-        }        
-        //Clear older data from viewDuration
-        if(!this.isXY && parseFloat(app.viewDuration)>0)
-        {
-            let latestTimestamp = this.data[0][this.data[0].length-1];
-            let minTimestamp = latestTimestamp - parseFloat(app.viewDuration);
-            let minIdx = findClosestLowerByIdx(this.data[0], minTimestamp);
-            if(this.data[0][minIdx]<minTimestamp)
-            {
-                minIdx += 1;
-                for(let i=0;i<this.data.length;i++){
-                    this.data[i].splice(0, minIdx);
-                }
-            }
+            for(let s of this.series) dataList.push(s.data);
+            this.data.length = 0;
+            this.data.push(...uPlot.join(dataList));
         }
     }
 }
 
 function parseData(msgIn){
+    if(app.isViewPaused) return; // Do not buffer incomming data while paused
     let now = new Date().getTime();
     let fromSerial = msgIn.fromSerial || (msgIn.input && msgIn.input.type=="serial");
     if(fromSerial) now = msgIn.timestamp;
@@ -731,6 +838,7 @@ function parseData(msgIn){
                 let cmdList = msg.split("|");
                 for(let cmd of cmdList){
                     if(cmd.length==0) continue;
+                    if(cmd.startsWith("_")) continue;
                     if(app.commands[cmd] == undefined){
                         let newCmd = {
                             name: cmd
@@ -769,9 +877,25 @@ function parseData(msgIn){
                 let values = msg.substr(startIdx+1, endIdx-startIdx-1).split(';')
                 let xArray = [];
                 let yArray = [];
+                let zArray = [];
                 for(let value of values){
                     if(value.length==0) continue;
-                    let sepIdx = value.indexOf(':');
+                    let dims = value.split(":");
+                    if(dims.length == 1){
+                        xArray.push(now);
+                        yArray.push(parseFloat(dims[0]));
+                    }
+                    else if(dims.length == 2){
+                        xArray.push(parseFloat(dims[0]));
+                        yArray.push(parseFloat(dims[1]));
+                        zArray.push(now);
+                    }
+                    else if(dims.length == 3){
+                        xArray.push(parseFloat(dims[0]));
+                        yArray.push(parseFloat(dims[1]));
+                        zArray.push(parseFloat(dims[2]));
+                    }
+                    /*let sepIdx = value.indexOf(':');
                     if(sepIdx==-1){
                         xArray.push(now);
                         yArray.push(parseFloat(value));
@@ -779,10 +903,10 @@ function parseData(msgIn){
                     else {
                         xArray.push(parseFloat(value.substr(0, sepIdx)));
                         yArray.push(parseFloat(value.substr(sepIdx+1)));
-                    }
+                    }*/
                 }
                 if(xArray.length>0){
-                    appendData(name, xArray, yArray, flags)
+                    appendData(name, xArray, yArray, zArray, flags)
                 }
             }
         }
@@ -790,7 +914,7 @@ function parseData(msgIn){
     }
 }
 
-function appendData(key, valuesX, valuesY, flags) {
+function appendData(key, valuesX, valuesY, valuesZ, flags) {
     if(key.substring(0, 6) === "statsd") return;
     let isTimeBased = !flags.includes("xy");
     let shouldPlot = !flags.includes("np");
@@ -810,29 +934,41 @@ function appendData(key, valuesX, valuesY, flags) {
             pendingData: [[],[]],
             value: 0,
             config: config,
-            xy: !isTimeBased
+            xy: !isTimeBased,
+            usageCount: 0
         };
+        if(!isTimeBased){
+            obj.data.push([]);
+            obj.pendingData.push([]);
+        }
         Vue.set(app.telemetries, key, obj)
         // Create widget
         if(shouldPlot){
             let chart = new ChartWidget(!isTimeBased);
             let serie = new DataSerie(key);
-            serie.sourceNames = [key];
+            serie.addSource(key);
             chart.addSerie(serie);
             widgets.push(chart);
         }
     }
     if(telemBuffer[key] == undefined){
         telemBuffer[key] = {data:[[],[]], value:0};
+        if(!isTimeBased) telemBuffer[key].data.push([]);
     }
-    if(isTimeBased) valuesX.forEach((elem, idx, arr)=>arr[idx] = elem/1000); // convert timestamps to seconds
+
+    // Convert timestamps to seconds
+    if(isTimeBased) { valuesX.forEach((elem, idx, arr)=>arr[idx] = elem/1000); }
+    else            { valuesZ.forEach((elem, idx, arr)=>arr[idx] = elem/1000); }
 
     // Flush data into buffer (to be flushed by updateView)
     telemBuffer[key].data[0].push(...valuesX);
     telemBuffer[key].data[1].push(...valuesY);
-    telemBuffer[key].value = valuesY[valuesY.length-1];
     if(app.telemetries[key].xy) {
         telemBuffer[key].value = ""+valuesX[valuesX.length-1].toFixed(4)+" "+valuesY[valuesY.length-1].toFixed(4)+"";
+        telemBuffer[key].data[2].push(...valuesZ);
+    }
+    else {
+        telemBuffer[key].value = valuesY[valuesY.length-1];
     }
     return;
 }
@@ -843,35 +979,45 @@ function updateView() {
     for(let key in app.telemetries) {
         app.telemetries[key].pendingData[0].length = 0;
         app.telemetries[key].pendingData[1].length = 0;
+        if(app.telemetries[key].xy) app.telemetries[key].pendingData[2].length = 0;
     }
-    // Flush buffer into app model
-    // Telemetry
+    // Flush Telemetry buffer into app model
     let dataSum = 0;
-    for(let key in telemBuffer) {
-        if(telemBuffer[key].data[0].length == 0) continue; // nothing to flush
-        dataSum += telemBuffer[key].data[0].length;
-        app.telemetries[key].data[0].push(...telemBuffer[key].data[0]);
-        app.telemetries[key].data[1].push(...telemBuffer[key].data[1]);
-        app.telemetries[key].pendingData[0].push(...telemBuffer[key].data[0]);
-        app.telemetries[key].pendingData[1].push(...telemBuffer[key].data[1]);
-        app.telemetries[key].value = telemBuffer[key].value;
-        telemBuffer[key].data[0].length = 0;
-        telemBuffer[key].data[1].length = 0;
+    if(!app.isViewPaused){
+        for(let key in telemBuffer) {
+            if(telemBuffer[key].data[0].length == 0) continue; // nothing to flush
+            dataSum += telemBuffer[key].data[0].length;
+            app.telemetries[key].data[0].push(...telemBuffer[key].data[0]);
+            app.telemetries[key].data[1].push(...telemBuffer[key].data[1]);
+            if(app.telemetries[key].xy) app.telemetries[key].data[2].push(...telemBuffer[key].data[2]);
+            app.telemetries[key].pendingData[0].push(...telemBuffer[key].data[0]);
+            app.telemetries[key].pendingData[1].push(...telemBuffer[key].data[1]);
+            if(app.telemetries[key].xy) app.telemetries[key].pendingData[2].push(...telemBuffer[key].data[2]);
+            telemBuffer[key].data[0].length = 0;
+            telemBuffer[key].data[1].length = 0;
+            if(app.telemetries[key].xy) telemBuffer[key].data[2].length = 0;
+            app.telemetries[key].value = telemBuffer[key].value
+        }
     }
+
     //Clear older data from viewDuration
     if(parseFloat(app.viewDuration)>0)
     {
         for(let key in app.telemetries) {
             let data = app.telemetries[key].data;
-            let latestTimestamp = data[0][data[0].length-1];
+            let timeIdx = 0;
+            if(app.telemetries[key].xy) timeIdx = 2;
+            let latestTimestamp = data[timeIdx][data[timeIdx].length-1];
             let minTimestamp = latestTimestamp - parseFloat(app.viewDuration);
-            let minIdx = findClosestLowerByIdx(data[0], minTimestamp);
-            if(data[0][minIdx]<minTimestamp) minIdx += 1;
+            let minIdx = findClosestLowerByIdx(data[timeIdx], minTimestamp);
+            if(data[timeIdx][minIdx]<minTimestamp) minIdx += 1;
             else continue;
             app.telemetries[key].data[0].splice(0, minIdx);
             app.telemetries[key].data[1].splice(0, minIdx);
+            if(app.telemetries[key].xy) app.telemetries[key].data[2].splice(0, minIdx);
         }
     }
+
     // Update widgets
     for(let w of widgets){
         w.update();
@@ -881,7 +1027,7 @@ function updateView() {
 
     // Logs
     var logSum = logBuffer.length;
-    if(logBuffer.length>0) {
+    if(!app.isViewPaused &&  logBuffer.length>0) {
         app.logs.unshift(...logBuffer);//prepend log to list
         logBuffer.length = 0;
     }
@@ -973,6 +1119,76 @@ function importSessionJSON(event) {
             }
             // Trigger a resize event after initial chart display
                 triggerChartResize();
+        }
+        catch(e) {
+            alert("Importation failed: "+e.toString());
+        }
+    };
+    reader.readAsText(file);
+}
+
+function exportLayout() {
+    let obj = {
+        widgets: [],
+        viewDuration: app.viewDuration
+    };
+    for(let w of widgets) {
+        let widget = {
+            type: w.type,
+            gridPos: w.gridPos,
+            series: []
+        };
+        for(let s of w.series) {
+            let serie = {
+                name: s.name,
+                sourceNames: s.sourceNames,
+                formula: s.formula,
+                options: s.options
+            }
+            widget.series.push(serie);
+        }
+        obj.widgets.push(widget);
+    }
+    let content = JSON.stringify(obj);
+    let now = new Date();
+    let filename = `teleplot_layout_${now.getFullYear()}-${now.getMonth()}-${now.getDate()}_${now.getHours()}-${now.getMinutes()}.json`;
+    saveFile(content, filename);
+}
+
+function importLayoutJSON(event) {
+    var file = event.target.files[0];
+    if (!file) {
+        return;
+    }
+    var reader = new FileReader();
+    reader.onload = function(e) {
+        try{
+            let content = JSON.parse(e.target.result);
+            if("viewDuration" in content) app.viewDuration = content.viewDuration;
+            for(let w of content.widgets){
+                if(w.type == "chart"){
+                    let newSeries = []
+                    let isXY = false;
+                    for(let s of w.series){
+                        let serie = new DataSerie(s.name);
+                        for(let sn of s.sourceNames){
+                            if(sn in app.telemetries && app.telemetries[sn].xy) {
+                                isXY = true;
+                            }
+                            serie.addSource(sn);
+                        }
+                        newSeries.push(serie);
+                    }
+                    let chart = new ChartWidget(isXY);
+                    for(let s of newSeries) {
+                        chart.addSerie(s);
+                    }
+                    chart.gridPos = w.gridPos;
+                    setTimeout(()=>{updateWidgetSize_(chart)}, 100);
+                    widgets.push(chart);
+                }
+            }
+            app.leftPanelVisible = false; // hide telemetry list
         }
         catch(e) {
             alert("Importation failed: "+e.toString());
@@ -1076,10 +1292,22 @@ function updateDisplayedVarValues(valueX, valueY){
     let telemList = Object.keys(app.telemetries);
     for(let telemName of telemList) {
         let telem = app.telemetries[telemName];
-        if(telem.xy) continue;
-        let idx = findClosestLowerByIdx(telem.data[0], valueX);
-        if(idx < telem.data[0].length) {
-            telem.value = telem.data[1][idx];
+        let timeIdx = 0;
+        if(telem.xy) { timeIdx = 2; }
+        let idx = findClosestLowerByIdx(telem.data[timeIdx], valueX);
+        if(idx >= telem.data[timeIdx].length) continue;
+        //Refine index, closer to timestamp
+        if(idx+1 < telem.data[timeIdx].length
+            && (valueX-telem.data[timeIdx][idx]) > (telem.data[timeIdx][idx+1]-valueX)){
+            idx +=1;
+        }
+        if(idx < telem.data[timeIdx].length) {
+            if(telem.xy) {
+                app.telemetries[telemName].value = ""+telem.data[0][idx].toFixed(4)+" "+telem.data[1][idx].toFixed(4)+"";
+            }
+            else {
+                app.telemetries[telemName].value = telem.data[1][idx];
+            }
         }
     }
 }
@@ -1089,9 +1317,29 @@ if(vscode){
     conn.connect();
     app.connections.push(conn);
 }
+else {
+    let conn = new ConnectionTeleplotWebsocket();
+    let addr = window.location.hostname;
+    let port = window.location.port;
+    conn.connect(addr, port);
+    app.connections.push(conn);
+}
+
+function onTelemetryUsed(name, force=false){
+    let telem = app.telemetries[name];
+    if(telem == undefined) return;
+    if(!force) telem.usageCount++;
+}
+
+function onTelemetryUnused(name, force=false){
+    let telem = app.telemetries[name];
+    if(telem == undefined) return;
+    if(telem.usageCount>0)telem.usageCount--;
+}
 
 setInterval(()=>{
     for(let conn of app.connections){
         conn.updateCMDList();
     }
 }, 3000);
+

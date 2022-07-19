@@ -129,7 +129,7 @@ function runCmd(msg:any){
 			}
 		})
 		
-		const parser = serials[id].pipe(new ReadlineParser({ delimiter: '\r\n' }));
+		const parser = serials[id].pipe(new ReadlineParser({ delimiter: '\n' }));
 		parser.on('data', function(data:any) {
 			currentPanel.webview.postMessage({id, data: data.toString(), fromSerial:true, timestamp: new Date().getTime()});
 		})
