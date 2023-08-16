@@ -1,3 +1,10 @@
+# Repository deprecated
+This repository has been merged with [the main Teleplot repo](https://github.com/nesnes/teleplot) and won't be updated anymore.
+
+The VSCode extension of teleplot will now be maintained from [the main Teleplot repo](https://github.com/nesnes/teleplot)
+
+# Please go [there](https://github.com/nesnes/teleplot) instead.
+
 # Teleplot for VSCode
 
 Plots telemetry sent over **Serial** or **UDP Packets**.
